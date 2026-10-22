@@ -21,6 +21,7 @@ export interface SubscriptionState {
   startedAt: string;
   trialEndsAt: string;
   priceLabel: string;
+  provider?: 'stripe' | 'app_store' | 'play_store' | 'local';
 }
 
 export interface PlanOption {
@@ -33,7 +34,19 @@ export interface PlanOption {
   badge?: string;
   badgeColor?: string;
   trialDays: number;
+  stripeUrl?: string;
 }
+
+const env = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env;
+
+export const STRIPE_PAYMENT_LINKS: Record<PlanId, string | undefined> = {
+  weekly: env.VITE_STRIPE_WEEKLY_URL?.trim() || 'https://buy.stripe.com/3cI9ATdr75Cjaf3dCYfjG00',
+  monthly: env.VITE_STRIPE_MONTHLY_URL?.trim() || 'https://buy.stripe.com/8x2aEX72Je8P3QFeH2fjG01',
+  six_month: env.VITE_STRIPE_SIX_MONTH_URL?.trim() || 'https://buy.stripe.com/fZu8wP0El3ubaf38iEfjG02',
+  yearly: env.VITE_STRIPE_YEARLY_URL?.trim() || 'https://buy.stripe.com/dRm5kD72J6Gn2MB1UgfjG03'
+};
+
+export const STRIPE_PORTAL_URL = env.VITE_STRIPE_PORTAL_URL?.trim() || undefined;
 
 export const PAYWALL_PLANS: PlanOption[] = [
   {
@@ -45,7 +58,8 @@ export const PAYWALL_PLANS: PlanOption[] = [
     equivalent: 'Only $8.33/mo • Save 52%',
     badge: 'BEST VALUE',
     badgeColor: 'from-[#FE2C55] to-[#A855F7]',
-    trialDays: 3
+    trialDays: 3,
+    stripeUrl: STRIPE_PAYMENT_LINKS.yearly
   },
   {
     id: 'six_month',
@@ -56,7 +70,8 @@ export const PAYWALL_PLANS: PlanOption[] = [
     equivalent: 'Only $8.33/mo • Billed every 6 months',
     badge: 'GREAT VALUE',
     badgeColor: 'from-[#25F4EE] to-[#3B82F6]',
-    trialDays: 3
+    trialDays: 3,
+    stripeUrl: STRIPE_PAYMENT_LINKS.six_month
   },
   {
     id: 'monthly',
@@ -67,7 +82,8 @@ export const PAYWALL_PLANS: PlanOption[] = [
     equivalent: 'Billed monthly • Cancel anytime',
     badge: 'POPULAR',
     badgeColor: 'from-[#6366F1] to-[#8B5CF6]',
-    trialDays: 3
+    trialDays: 3,
+    stripeUrl: STRIPE_PAYMENT_LINKS.monthly
   },
   {
     id: 'weekly',
@@ -78,9 +94,15 @@ export const PAYWALL_PLANS: PlanOption[] = [
     equivalent: 'Flexible weekly access • Cancel anytime',
     badge: 'FLEXIBLE',
     badgeColor: 'from-slate-600 to-slate-500',
-    trialDays: 3
+    trialDays: 3,
+    stripeUrl: STRIPE_PAYMENT_LINKS.weekly
   }
 ];
+
+function isNativeApp(): boolean {
+  const w = window as Window & { Capacitor?: { isNativePlatform?: () => boolean } };
+  return Boolean(w.Capacitor?.isNativePlatform?.());
+}
 
 interface PaywallProps {
   /**
@@ -89,6 +111,7 @@ interface PaywallProps {
    */
   isHardPaywall?: boolean;
   userName?: string;
+  userEmail?: string;
   currentSubscription?: SubscriptionState | null;
   onStartTrial: (sub: SubscriptionState) => void;
   onRestorePurchases: () => boolean;
@@ -98,6 +121,7 @@ interface PaywallProps {
 export default function Paywall({
   isHardPaywall = true,
   userName,
+  userEmail,
   currentSubscription,
   onStartTrial,
   onRestorePurchases,
@@ -116,20 +140,29 @@ export default function Paywall({
   const handleSubscribe = () => {
     setProcessing(true);
     setStatusMessage(null);
+
+    // If a Stripe Payment Link is configured for this plan, redirect to Stripe Checkout!
+    if (!isNativeApp() && selectedPlan.stripeUrl) {
+      try {
+        const checkoutUrl = new URL(selectedPlan.stripeUrl);
+        if (userEmail) {
+          checkoutUrl.searchParams.set('prefilled_email', userEmail);
+        }
+        localStorage.setItem('tokvault_pending_plan_v1', selectedPlan.id);
+        window.location.href = checkoutUrl.toString();
+        return;
+      } catch {
+        // Fallback if invalid URL
+      }
+    }
+
+    // Hard stop when Stripe checkout URLs are not yet connected
     setTimeout(() => {
-      const now = new Date();
-      const trialEnd = new Date(now.getTime() + selectedPlan.trialDays * 24 * 60 * 60 * 1000);
-      const sub: SubscriptionState = {
-        active: true,
-        planId: selectedPlan.id,
-        trialDays: selectedPlan.trialDays,
-        startedAt: now.toISOString(),
-        trialEndsAt: trialEnd.toISOString(),
-        priceLabel: selectedPlan.priceLabel
-      };
       setProcessing(false);
-      onStartTrial(sub);
-    }, 600);
+      setStatusMessage(
+        `Stripe Checkout for the ${selectedPlan.name} (${selectedPlan.priceLabel} after ${selectedPlan.trialDays}-day free trial) is being connected. Add your Stripe Payment Links to unlock access.`
+      );
+    }, 400);
   };
 
   const handleRestore = () => {
@@ -328,7 +361,7 @@ export default function Paywall({
             <span className="flex items-center gap-2">
               <Crown className="w-5 h-5 fill-amber-300 text-amber-200" />
               {processing
-                ? 'Activating Your Free Trial...'
+                ? 'Redirecting to Secure Checkout...'
                 : `Click Here to Start ${selectedPlan.trialDays}-Day Free Trial`}
             </span>
             <span className="text-[11px] font-medium text-white/90 mt-0.5">
@@ -358,7 +391,13 @@ export default function Paywall({
 
             <button
               type="button"
-              onClick={() => setLegalDoc('terms')}
+              onClick={() => {
+                if (!isNativeApp() && STRIPE_PORTAL_URL) {
+                  window.open(STRIPE_PORTAL_URL, '_blank', 'noopener,noreferrer');
+                } else {
+                  setLegalDoc('terms');
+                }
+              }}
               className="hover:text-white py-1 cursor-pointer"
             >
               Manage Subscription ↗
@@ -412,7 +451,7 @@ export default function Paywall({
             <p className="leading-relaxed text-slate-400">
               {legalDoc === 'privacy'
                 ? 'TokVault stores your saved TikTok links, folders, tags, and personal notes locally on your device. If you choose to sign in with an account and use Cloud Backup, your encrypted backup payload is stored privately under your user ID with Row-Level Security.'
-                : 'TokVault Pro subscriptions include a 3-day free trial. Available plans: Weekly ($3.99/week), Monthly ($9.99/month), 6-Month ($49.99 every 6 months), and Annual ($99.99/year). You may cancel your free trial or subscription at any time in your App Store, Google Play, or Web account settings at least 24 hours before the renewal date to avoid being charged.'}
+                : 'TokVault Pro subscriptions include a 3-day free trial. Available plans: Weekly ($3.99/week), Monthly ($9.99/month), 6-Month ($49.99 every 6 months), and Annual ($99.99/year). You may cancel your free trial or subscription at any time in your App Store, Google Play, or Stripe Customer Portal settings at least 24 hours before the renewal date to avoid being charged.'}
             </p>
             <button
               onClick={() => setLegalDoc(null)}

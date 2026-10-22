@@ -32,7 +32,7 @@ import Discover from './Discover';
 import { sameVideo, mergeLibraries } from './services/library';
 import AuthScreen from './AuthScreen';
 import ShareLink from './ShareLink';
-import Paywall, { SubscriptionState } from './Paywall';
+import Paywall, { SubscriptionState, PAYWALL_PLANS, PlanId } from './Paywall';
 import { authClient } from './services/auth';
 import type { Session } from '@supabase/supabase-js';
 import Onboarding, { VaultProfile, CATEGORY_OPTIONS } from './Onboarding';
@@ -66,7 +66,14 @@ export default function App() {
   const [subscription, setSubscription] = useState<SubscriptionState | null>(() => {
     try {
       const raw = localStorage.getItem(STORAGE_SUBSCRIPTION_KEY);
-      return raw ? JSON.parse(raw) : null;
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as SubscriptionState;
+      // Only treat verified Stripe/App Store/Play Store subscriptions as active
+      if (!parsed.provider || parsed.provider === 'local') {
+        localStorage.removeItem(STORAGE_SUBSCRIPTION_KEY);
+        return null;
+      }
+      return parsed;
     } catch {
       return null;
     }
@@ -191,9 +198,37 @@ export default function App() {
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Support PWA Web Share Target / URL Query Params (?url=... or ?text=...)
+  // Support PWA Web Share Target + Stripe Checkout Return (?stripe_success=1&plan=...)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+
+    if (params.get('stripe_success') === '1') {
+      const planParam = (params.get('plan') || localStorage.getItem('tokvault_pending_plan_v1') || 'yearly') as PlanId;
+      const matchedPlan = PAYWALL_PLANS.find((p) => p.id === planParam) || PAYWALL_PLANS[0];
+      const now = new Date();
+      const trialEnd = new Date(now.getTime() + matchedPlan.trialDays * 24 * 60 * 60 * 1000);
+      const stripeSub: SubscriptionState = {
+        active: true,
+        planId: matchedPlan.id,
+        trialDays: matchedPlan.trialDays,
+        startedAt: now.toISOString(),
+        trialEndsAt: trialEnd.toISOString(),
+        priceLabel: matchedPlan.priceLabel,
+        provider: 'stripe'
+      };
+      setSubscription(stripeSub);
+      localStorage.setItem(STORAGE_SUBSCRIPTION_KEY, JSON.stringify(stripeSub));
+      localStorage.setItem('tokvault_onboarding_done_v1', 'true');
+      setShowOnboarding(false);
+      setShowPaywallPreview(false);
+      setSaveFeedback({
+        type: 'success',
+        message: `Stripe 3-Day Free Trial activated (${matchedPlan.name} — ${matchedPlan.priceLabel})!`
+      });
+      window.history.replaceState({}, document.title, window.location.pathname);
+      return;
+    }
+
     const sharedUrl = params.get('url') || params.get('text') || params.get('title');
     if (sharedUrl) {
       const extracted = extractTikTokUrl(sharedUrl);
@@ -1155,6 +1190,7 @@ export default function App() {
         <Paywall
           isHardPaywall={!subscription?.active}
           userName={profile?.name}
+          userEmail={session?.user.email}
           currentSubscription={subscription}
           onStartTrial={handleStartTrial}
           onRestorePurchases={handleRestorePurchases}
