@@ -1,15 +1,18 @@
 import React, { useState } from 'react';
 import { Apple, Bookmark, Loader2, Mail, X } from 'lucide-react';
 import { authClient, authRedirect, googleAuthEnabled, appleAuthEnabled } from './services/auth';
+import { verifyAdminOrVipCredentials, setActiveAdminEmail } from './services/adminAccess';
 
 export default function AuthScreen({
   recovery = false,
   onContinue,
-  onRecovered
+  onRecovered,
+  onAdminOrVipUnlock
 }: {
   recovery?: boolean;
   onContinue: () => void;
   onRecovered: () => void;
+  onAdminOrVipUnlock?: (role: 'admin' | 'vip', email: string) => void;
 }) {
   const [mode, setMode] = useState<'signin' | 'signup' | 'forgot'>('signin');
   const [email, setEmail] = useState('');
@@ -104,6 +107,17 @@ export default function AuthScreen({
           );
         }
       } else {
+        const verified = verifyAdminOrVipCredentials(email, password);
+        if (verified) {
+          if (verified.role === 'admin') {
+            setActiveAdminEmail(verified.email);
+          }
+          // Attempt Supabase login in background if confirmed
+          await authClient.auth.signInWithPassword({ email, password }).catch(() => {});
+          onAdminOrVipUnlock?.(verified.role, verified.email);
+          onContinue();
+          return;
+        }
         const { error } = await authClient.auth.signInWithPassword({ email, password });
         if (error) throw error;
         onContinue();

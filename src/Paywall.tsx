@@ -9,8 +9,11 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
-  X
+  X,
+  KeyRound
 } from 'lucide-react';
+import { verifyAdminOrVipCredentials, setActiveAdminEmail } from './services/adminAccess';
+import { authClient } from './services/auth';
 
 export type PlanId = 'weekly' | 'monthly' | 'six_month' | 'yearly';
 
@@ -21,7 +24,8 @@ export interface SubscriptionState {
   startedAt: string;
   trialEndsAt: string;
   priceLabel: string;
-  provider?: 'stripe' | 'app_store' | 'play_store' | 'local';
+  provider?: 'stripe' | 'app_store' | 'play_store' | 'admin' | 'vip' | 'local';
+  vipEmail?: string;
 }
 
 export interface PlanOption {
@@ -133,6 +137,54 @@ export default function Paywall({
   const [processing, setProcessing] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [legalDoc, setLegalDoc] = useState<'terms' | 'privacy' | 'eula' | null>(null);
+  const [showVipLogin, setShowVipLogin] = useState(false);
+  const [vipEmailInput, setVipEmailInput] = useState('');
+  const [vipPassInput, setVipPassInput] = useState('');
+
+  const handleVipLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStatusMessage(null);
+    const verified = verifyAdminOrVipCredentials(vipEmailInput, vipPassInput);
+    if (!verified) {
+      setStatusMessage('Invalid Admin or VIP email/password. Please check your credentials.');
+      return;
+    }
+
+    setProcessing(true);
+    // Also sign into Supabase in the background if confirmed
+    if (authClient) {
+      try {
+        await authClient.auth.signInWithPassword({
+          email: verified.email,
+          password: vipPassInput.trim()
+        });
+      } catch {
+        // Proceed with Admin/VIP unlock even if email confirmation is pending
+      }
+    }
+
+    if (verified.role === 'admin') {
+      setActiveAdminEmail(verified.email);
+    }
+
+    const now = new Date();
+    const tenYears = new Date(now.getTime() + 3650 * 24 * 60 * 60 * 1000);
+    const sub: SubscriptionState = {
+      active: true,
+      planId: 'yearly',
+      trialDays: 3650,
+      startedAt: now.toISOString(),
+      trialEndsAt: tenYears.toISOString(),
+      priceLabel:
+        verified.role === 'admin'
+          ? `Unlimited Admin Access (${verified.email})`
+          : `Unlimited VIP Access (${verified.email})`,
+      provider: verified.role,
+      vipEmail: verified.email
+    };
+    setProcessing(false);
+    onStartTrial(sub);
+  };
 
   const selectedPlan =
     PAYWALL_PLANS.find((p) => p.id === selectedPlanId) || PAYWALL_PLANS[0];
@@ -378,8 +430,8 @@ export default function Paywall({
             </p>
           )}
 
-          {/* Restore & Manage Links */}
-          <div className="flex items-center justify-between px-2 pt-1 text-xs font-semibold text-slate-400">
+          {/* Restore, Admin/VIP Login & Manage Links */}
+          <div className="flex flex-wrap items-center justify-between gap-2 px-2 pt-1 text-xs font-semibold text-slate-400">
             <button
               type="button"
               onClick={handleRestore}
@@ -387,6 +439,15 @@ export default function Paywall({
             >
               <RefreshCw className="w-3.5 h-3.5 text-[#25F4EE]" />
               Restore Purchases
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowVipLogin(!showVipLogin)}
+              className="hover:text-white text-[#25F4EE] flex items-center gap-1.5 py-1 cursor-pointer"
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              Admin / VIP Sign In
             </button>
 
             <button
@@ -403,6 +464,51 @@ export default function Paywall({
               Manage Subscription ↗
             </button>
           </div>
+
+          {showVipLogin && (
+            <form
+              onSubmit={handleVipLogin}
+              className="p-3.5 rounded-2xl bg-[#141722] border border-[#25F4EE]/40 space-y-2.5 mt-2"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-[#25F4EE] flex items-center gap-1.5">
+                  <KeyRound className="w-3.5 h-3.5" />
+                  Admin or Granted VIP Sign-In
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowVipLogin(false)}
+                  className="text-slate-400 hover:text-white"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <input
+                  type="email"
+                  required
+                  value={vipEmailInput}
+                  onChange={(e) => setVipEmailInput(e.target.value)}
+                  placeholder="Email (e.g. dolair01@gmail.com)"
+                  className="px-3 py-2 rounded-xl bg-[#0B0C10] border border-[#34394C] text-xs text-white focus:border-[#25F4EE] focus:outline-none"
+                />
+                <input
+                  type="password"
+                  required
+                  value={vipPassInput}
+                  onChange={(e) => setVipPassInput(e.target.value)}
+                  placeholder="Password / VIP Passcode"
+                  className="px-3 py-2 rounded-xl bg-[#0B0C10] border border-[#34394C] text-xs text-white focus:border-[#25F4EE] focus:outline-none"
+                />
+              </div>
+              <button
+                type="submit"
+                className="w-full py-2.5 rounded-xl bg-[#25F4EE] text-[#0B0C10] font-extrabold text-xs cursor-pointer"
+              >
+                Unlock Unlimited Access
+              </button>
+            </form>
+          )}
         </div>
 
         {/* Legal Auto-Renewal Terms */}

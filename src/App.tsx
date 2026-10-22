@@ -25,7 +25,8 @@ import {
   UserRound,
   Clock,
   Settings,
-  Crown
+  Crown,
+  ShieldCheck
 } from 'lucide-react';
 import CloudBackup from './CloudBackup';
 import Discover from './Discover';
@@ -33,6 +34,13 @@ import { sameVideo, mergeLibraries } from './services/library';
 import AuthScreen from './AuthScreen';
 import ShareLink from './ShareLink';
 import Paywall, { SubscriptionState, PAYWALL_PLANS, PlanId } from './Paywall';
+import AdminModal from './AdminModal';
+import {
+  isAdminEmail,
+  getActiveAdminEmail,
+  setActiveAdminEmail,
+  parseVipGrantToken
+} from './services/adminAccess';
 import { authClient } from './services/auth';
 import type { Session } from '@supabase/supabase-js';
 import Onboarding, { VaultProfile, CATEGORY_OPTIONS } from './Onboarding';
@@ -79,6 +87,12 @@ export default function App() {
     }
   });
   const [showPaywallPreview, setShowPaywallPreview] = useState(false);
+  const [showAdminModal, setShowAdminModal] = useState(false);
+
+  const isAdmin =
+    isAdminEmail(session?.user.email) ||
+    subscription?.provider === 'admin' ||
+    isAdminEmail(getActiveAdminEmail());
 
   useEffect(() => {
     if (!authClient) return;
@@ -86,10 +100,35 @@ export default function App() {
     const { data: { subscription: authSub } } = authClient.auth.onAuthStateChange((event, next) => {
       if (!mounted) return;
       setSession(next); setAuthReady(true);
+      if (next?.user.email && isAdminEmail(next.user.email)) {
+        setActiveAdminEmail(next.user.email);
+        const now = new Date();
+        const adminSub: SubscriptionState = {
+          active: true,
+          planId: 'yearly',
+          trialDays: 3650,
+          startedAt: now.toISOString(),
+          trialEndsAt: new Date(now.getTime() + 3650 * 24 * 60 * 60 * 1000).toISOString(),
+          priceLabel: `Unlimited Admin Access (${next.user.email})`,
+          provider: 'admin',
+          vipEmail: next.user.email
+        };
+        setSubscription(adminSub);
+        localStorage.setItem(STORAGE_SUBSCRIPTION_KEY, JSON.stringify(adminSub));
+      }
       if (event === 'PASSWORD_RECOVERY') { setPasswordRecovery(true); setShowAuth(true); }
       else if (next && event === 'SIGNED_IN') setShowAuth(false);
     });
-    authClient.auth.getSession().then(({ data }) => { if (mounted) { setSession(data.session); setAuthReady(true); if (data.session && !window.location.hash.includes('type=recovery')) setShowAuth(false); } });
+    authClient.auth.getSession().then(({ data }) => {
+      if (mounted) {
+        setSession(data.session);
+        setAuthReady(true);
+        if (data.session?.user.email && isAdminEmail(data.session.user.email)) {
+          setActiveAdminEmail(data.session.user.email);
+        }
+        if (data.session && !window.location.hash.includes('type=recovery')) setShowAuth(false);
+      }
+    });
     return () => { mounted = false; authSub.unsubscribe(); };
   }, []);
   const [profile, setProfile] = useState<VaultProfile | null>(() => {
@@ -198,9 +237,38 @@ export default function App() {
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Support PWA Web Share Target + Stripe Checkout Return (?stripe_success=1&plan=...)
+  // Support PWA Web Share Target + Stripe Checkout Return + Admin VIP Invite Links
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+
+    const vipGrantParam = params.get('vip_grant');
+    if (vipGrantParam) {
+      const parsedGrant = parseVipGrantToken(vipGrantParam);
+      if (parsedGrant) {
+        const now = new Date();
+        const vipSub: SubscriptionState = {
+          active: true,
+          planId: 'yearly',
+          trialDays: 3650,
+          startedAt: now.toISOString(),
+          trialEndsAt: new Date(now.getTime() + 3650 * 24 * 60 * 60 * 1000).toISOString(),
+          priceLabel: `Unlimited VIP Access (${parsedGrant.email})`,
+          provider: isAdminEmail(parsedGrant.email) ? 'admin' : 'vip',
+          vipEmail: parsedGrant.email
+        };
+        setSubscription(vipSub);
+        localStorage.setItem(STORAGE_SUBSCRIPTION_KEY, JSON.stringify(vipSub));
+        localStorage.setItem('tokvault_onboarding_done_v1', 'true');
+        setShowOnboarding(false);
+        setShowPaywallPreview(false);
+        setSaveFeedback({
+          type: 'success',
+          message: `Unlimited VIP Access unlocked for ${parsedGrant.email}!`
+        });
+        window.history.replaceState({}, document.title, window.location.pathname);
+        return;
+      }
+    }
 
     if (params.get('stripe_success') === '1') {
       const planParam = (params.get('plan') || localStorage.getItem('tokvault_pending_plan_v1') || 'yearly') as PlanId;
@@ -584,15 +652,35 @@ export default function App() {
           })}
         </div>
 
-        {/* Bottom Actions (Paywall, Account, iOS/Android App Guide + Backup) */}
+        {/* Bottom Actions (Admin, Paywall, Account, iOS/Android App Guide + Backup) */}
         <div className="pt-4 mt-4 border-t border-[#252836] space-y-2">
+          {isAdmin && (
+            <button
+              onClick={() => setShowAdminModal(true)}
+              className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold bg-amber-400/15 hover:bg-amber-400/25 text-amber-300 border border-amber-400/40 transition"
+            >
+              <span className="flex items-center gap-2.5">
+                <ShieldCheck className="w-4 h-4 text-amber-300" />
+                <span>Admin Panel (Grant Access)</span>
+              </span>
+            </button>
+          )}
+
           <button
             onClick={() => setShowPaywallPreview(true)}
             className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold bg-gradient-to-r from-[#FE2C55]/20 to-[#8B5CF6]/20 hover:from-[#FE2C55]/30 hover:to-[#8B5CF6]/30 text-white border border-[#FE2C55]/40 transition"
           >
             <span className="flex items-center gap-2.5">
               <Crown className="w-4 h-4 text-amber-300 fill-amber-300" />
-              <span>{subscription?.active ? 'TokVault Pro (Active)' : 'Start 3-Day Free Trial'}</span>
+              <span>
+                {subscription?.provider === 'admin'
+                  ? 'Unlimited Admin Access'
+                  : subscription?.provider === 'vip'
+                  ? 'Unlimited VIP Access'
+                  : subscription?.active
+                  ? 'TokVault Pro (Active)'
+                  : 'Start 3-Day Free Trial'}
+              </span>
             </span>
           </button>
 
@@ -638,6 +726,16 @@ export default function App() {
             <span className="font-bold text-base">TokVault</span>
           </div>
           <div className="flex items-center gap-2">
+            {isAdmin && (
+              <button
+                onClick={() => setShowAdminModal(true)}
+                aria-label="Admin Access Manager"
+                className="p-2 rounded-lg bg-amber-400/20 border border-amber-400/40 text-amber-300"
+                title="Admin Access Manager"
+              >
+                <ShieldCheck className="w-4 h-4" />
+              </button>
+            )}
             <button
               onClick={() => setShowPaywallPreview(true)}
               aria-label="TokVault Pro Plans"
@@ -1100,6 +1198,18 @@ export default function App() {
                 >
                   View Plans / Change Tier
                 </button>
+                {isAdmin && (
+                  <button
+                    onClick={() => {
+                      setShowSettings(false);
+                      setShowAdminModal(true);
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-amber-400 text-black text-xs font-extrabold flex items-center gap-1"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    Admin Panel (Grant Access)
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     localStorage.removeItem('tokvault_onboarding_done_v1');
@@ -1202,6 +1312,25 @@ export default function App() {
       {(showAuth || passwordRecovery) && (
         <AuthScreen
           recovery={passwordRecovery}
+          onAdminOrVipUnlock={(role, email) => {
+            const now = new Date();
+            const sub: SubscriptionState = {
+              active: true,
+              planId: 'yearly',
+              trialDays: 3650,
+              startedAt: now.toISOString(),
+              trialEndsAt: new Date(now.getTime() + 3650 * 24 * 60 * 60 * 1000).toISOString(),
+              priceLabel:
+                role === 'admin'
+                  ? `Unlimited Admin Access (${email})`
+                  : `Unlimited VIP Access (${email})`,
+              provider: role,
+              vipEmail: email
+            };
+            setSubscription(sub);
+            localStorage.setItem(STORAGE_SUBSCRIPTION_KEY, JSON.stringify(sub));
+            setShowPaywallPreview(false);
+          }}
           onContinue={() => {
             sessionStorage.setItem('tokvault_guest_v1', 'true');
             setShowAuth(false);
@@ -1210,6 +1339,19 @@ export default function App() {
             setPasswordRecovery(false);
             setShowAuth(false);
           }}
+        />
+      )}
+
+      {/* 4. ADMIN ACCESS MANAGER MODAL */}
+      {showAdminModal && (
+        <AdminModal
+          adminEmail={
+            session?.user.email ||
+            subscription?.vipEmail ||
+            getActiveAdminEmail() ||
+            'dolair01@gmail.com'
+          }
+          onClose={() => setShowAdminModal(false)}
         />
       )}
 
