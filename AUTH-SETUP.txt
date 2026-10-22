@@ -1,0 +1,19 @@
+TOKVAULT ACCOUNT SETUP — CURRENT STATUS
+
+Supabase project TokVault is connected using its public publishable key in ignored .env.local. No service-role key is used. Keep this project on the Free plan; do not attach billing or enable paid services.
+
+Email/password authentication and email confirmation are enabled. The default Supabase email sender is still in use; production email delivery is not configured or verified. Signup, confirmation, reset, and authenticated backup/restore still need end-to-end testing with the owner’s own account.
+
+Google OAuth provider is configured in Supabase and VITE_GOOGLE_AUTH_ENABLED is true locally. Google consent branding is in testing mode. The Google client secret is stored only in Supabase, never in the frontend. Full sign-in and backup testing still requires the owner’s account. Apple provider remains pending and its button disabled. Apple web sign-in requires suitable public HTTPS hosting and Apple developer configuration.
+
+Site URL: http://192.168.1.196:5173/
+Allowed local redirects: http://localhost:5173/ and http://192.168.1.196:5173/
+Replace these with the deployed HTTPS URL before production. Native Capacitor builds require platform-specific redirects.
+
+CLOUD BACKUP
+The vault_backups table and per-user row-level security policy have been created. Anonymous access was verified blocked. Authenticated isolation between two accounts still requires testing before production.
+
+Library storage stays local to this browser/device and is not separated automatically when accounts switch. Backup uploads only after the signed-in user taps Back up now. Restore merges missing videos and retains local notes/edits. Automatic sync is not enabled.
+
+SHARING
+Sharing sends the original TikTok URL only. Native sharing needs a supported secure context (HTTPS); copy/manual selection is available as fallback. Social apps decide which links they accept.
