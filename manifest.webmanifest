@@ -1,0 +1,20 @@
+{
+  "name": "TokVault — Save & Search TikToks",
+  "short_name": "TokVault",
+  "description": "Save, organize, tag, and instantly search your favorite TikTok videos.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0B0C10",
+  "theme_color": "#FE2C55",
+  "orientation": "portrait-primary",
+  "share_target": {
+    "action": "./",
+    "method": "GET",
+    "enctype": "application/x-www-form-urlencoded",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  }
+}
