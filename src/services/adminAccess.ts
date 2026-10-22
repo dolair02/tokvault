@@ -6,9 +6,8 @@ export interface GrantedVipUser {
   inviteLink: string;
 }
 
-const ADMIN_EMAILS = ['dolair01@gmail.com'];
-// SHA-like lightweight verification hash so plaintext password isn't exposed in UI
-const ADMIN_PASS_EXPECTED = 'Homer69ab!';
+const ADMIN_EMAILS = ['dolair01@gmail.com', 'dolair02@gmail.com'];
+const ADMIN_PASS_VALID = ['Homer69ab!', 'homer69ab!'];
 const STORAGE_VIP_LIST_KEY = 'tokvault_admin_vip_list_v1';
 const STORAGE_ACTIVE_ADMIN_EMAIL_KEY = 'tokvault_active_admin_email_v1';
 
@@ -65,7 +64,7 @@ export function buildVipInviteLink(email: string, passcode: string, note = ''): 
     e: cleanEmail,
     p: passcode.trim(),
     n: note.trim(),
-    by: 'dolair01@gmail.com',
+    v: 1,
     ts: Date.now()
   };
   const encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
@@ -79,7 +78,7 @@ export function parseVipGrantToken(token: string): { email: string; passcode: st
   try {
     const json = decodeURIComponent(atob(token));
     const parsed = JSON.parse(json);
-    if (parsed && typeof parsed.e === 'string' && parsed.by === 'dolair01@gmail.com') {
+    if (parsed && typeof parsed.e === 'string' && (parsed.v === 1 || parsed.by)) {
       return {
         email: parsed.e,
         passcode: parsed.p || '',
@@ -102,13 +101,15 @@ export function verifyAdminOrVipCredentials(
   const cleanEmail = email.trim().toLowerCase();
   const cleanPass = password.trim();
 
-  if (isAdminEmail(cleanEmail) && (cleanPass === ADMIN_PASS_EXPECTED || password === ADMIN_PASS_EXPECTED)) {
+  if (isAdminEmail(cleanEmail) && ADMIN_PASS_VALID.includes(cleanPass)) {
     return { valid: true, role: 'admin', email: cleanEmail };
   }
 
   const vipList = getGrantedVipUsers();
   const matchedVip = vipList.find(
-    (u) => u.email.toLowerCase() === cleanEmail && u.passcode === cleanPass
+    (u) =>
+      u.email.toLowerCase() === cleanEmail &&
+      u.passcode.toLowerCase() === cleanPass.toLowerCase()
   );
   if (matchedVip) {
     return { valid: true, role: 'vip', email: cleanEmail };

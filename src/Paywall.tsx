@@ -489,7 +489,7 @@ export default function Paywall({
                   required
                   value={vipEmailInput}
                   onChange={(e) => setVipEmailInput(e.target.value)}
-                  placeholder="Email (e.g. dolair01@gmail.com)"
+                  placeholder="Email address"
                   className="px-3 py-2 rounded-xl bg-[#0B0C10] border border-[#34394C] text-xs text-white focus:border-[#25F4EE] focus:outline-none"
                 />
                 <input
@@ -497,7 +497,7 @@ export default function Paywall({
                   required
                   value={vipPassInput}
                   onChange={(e) => setVipPassInput(e.target.value)}
-                  placeholder="Password / VIP Passcode"
+                  placeholder="Password"
                   className="px-3 py-2 rounded-xl bg-[#0B0C10] border border-[#34394C] text-xs text-white focus:border-[#25F4EE] focus:outline-none"
                 />
               </div>
